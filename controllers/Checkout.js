@@ -25,7 +25,7 @@ exports.createProduct = async (req, res) => {
 }
 
 exports.createCheckoutSession = async (req, res) => {
-    const { id } = req.body;
+    const { id, plan } = req.body;
 
     try {
         const session = await stripe.checkout.sessions.create({
@@ -36,14 +36,11 @@ exports.createCheckoutSession = async (req, res) => {
                     product_data: {
                         name: item.name,
                     },
-                    recurring: {
-                        interval: 'month',
-                    },
                     unit_amount: Math.ceil(item.price * 100),
                 },
                 quantity: item.quantity,
             })),
-            mode: 'subscription',
+            mode: 'payment',
             success_url: `http://localhost:3000/translations`,
             cancel_url: `http://localhost:3000/translations`,
         });
@@ -54,15 +51,12 @@ exports.createCheckoutSession = async (req, res) => {
             throw new Error('User not found');
         }
 
-        const subscriptionData = {
-            stripeSubscriptionId: session.id || "",
-            status: "active",
-            priceId: req.body.items[0].price,
-            currentPeriodStart: new Date(),
-            currentPeriodEnd: new Date(new Date().setMonth(new Date().getMonth() + 1)),
-        };
+        user.subscriptionId = session.id || "";
+        user.plan = plan.title;
+        user.characterLimit = plan.characterLimit;
+        user.pageLimit = plan.pageLimit;
+        user.fileSizeLimit = plan.fileSizeLimit;
 
-        user.subscriptions.push(subscriptionData);
         await user.save();
 
         res.json({ id: session.id });

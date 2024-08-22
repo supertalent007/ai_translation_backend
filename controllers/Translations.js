@@ -1,5 +1,4 @@
 const multer = require('multer');
-const Translation = require('../models/Translation');
 const fs = require('fs');
 const fsPromises = require('fs/promises');
 const path = require('path');
@@ -9,6 +8,8 @@ const { PDFDocument, StandardFonts } = require('pdf-lib');
 const { Document, Packer, Paragraph } = require('docx');
 const pdfParse = require('pdf-parse');
 const OpenAI = require("openai");
+const Translation = require('../models/Translation');
+const User = require('../models/User');
 
 require('dotenv').config();
 
@@ -33,6 +34,50 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage }).single('file');
 
+exports.uploadFile = async (req, res) => {
+    upload(req, res, async function (err) {
+        if (err) {
+            return res.status(400).json({ error: 'Error uploading file' });
+        }
+
+        const userId = req.body.userId;
+        const file = req.file;
+        const toLanguage = req.body.toLanguage;
+
+        if (!file || !toLanguage) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        const fileData = new Translation({
+            userId: userId,
+            originName: file.originalname,
+            fileName: file.filename,
+            filePath: file.path,
+            fileType: file.mimetype,
+            fileSize: file.size,
+            toLanguage: toLanguage,
+        });
+
+        try {
+            await fileData.save();
+            res.status(200).json({ message: 'File uploaded successfully' });
+        } catch (error) {
+            res.status(500).json({ error: 'Error saving file details to database' });
+        }
+    });
+};
+
+exports.getSavedData = async (req, res) => {
+    const userId = req.query.userId;
+
+    Translation
+        .find({ userId: userId })
+        .sort({ updatedAt: -1 })
+        .then(result => {
+            res.status(200).json(result);
+        });
+};
+
 async function extractPdfText(pdfFilePath) {
     try {
         const dataBuffer = await fsPromises.readFile(pdfFilePath);
@@ -44,9 +89,15 @@ async function extractPdfText(pdfFilePath) {
     }
 }
 
-const regenerateDocx = async (originalFile, targetLanguage) => {
+const regenerateDocx = async (user, originalFile, targetLanguage) => {
     try {
         const { value: text } = await mammoth.extractRawText({ path: originalFile.filePath });
+        if (user.characterLimit < text.length) {
+            return null;
+        }
+
+        user.characterLimit = user.characterLimit - text.length;
+        await user.save();
 
         const translatedText = await translateText(text, targetLanguage);
 
@@ -146,60 +197,21 @@ const translateText = async (text, targetLanguage) => {
     }
 };
 
-exports.uploadFile = async (req, res) => {
-    upload(req, res, async function (err) {
-        if (err) {
-            return res.status(400).json({ error: 'Error uploading file' });
-        }
-
-        const userId = req.body.userId;
-        const file = req.file;
-        const toLanguage = req.body.toLanguage;
-
-        if (!file || !toLanguage) {
-            return res.status(400).json({ error: 'Missing required fields' });
-        }
-
-        const fileData = new Translation({
-            userId: userId,
-            originName: file.originalname,
-            fileName: file.filename,
-            filePath: file.path,
-            fileType: file.mimetype,
-            fileSize: file.size,
-            toLanguage: toLanguage,
-        });
-
-        try {
-            await fileData.save();
-            res.status(200).json({ message: 'File uploaded successfully' });
-        } catch (error) {
-            res.status(500).json({ error: 'Error saving file details to database' });
-        }
-    });
-};
-
-exports.getSavedData = async (req, res) => {
-    const userId = req.query.userId;
-
-    Translation
-        .find({ userId: userId })
-        .sort({ updatedAt: -1 })
-        .then(result => {
-            res.status(200).json(result);
-        });
-};
-
 exports.translate = async (req, res) => {
-    const { id } = req.body;
+    const { id, userId } = req.body;
 
     const data = await Translation.findOne({ _id: id });
+    const user = await User.findOne({ _id: userId });
 
     if (!data) {
-        res.status(400).send("There is no data with your id");
+        res.status(400).json({ message: "There is no data with your id" });
     } else {
         data.translated = true;
         await data.save();
+    }
+
+    if (user.fileSizeLimit < data.fileSize) {
+        res.status(500).json({ message: 'Your file size is over-limited. Please upgrade your plan.' })
     }
 
     try {
@@ -207,16 +219,21 @@ exports.translate = async (req, res) => {
 
         let translatedFilePath;
         if (data.fileType.includes('word')) {
-            translatedFilePath = await regenerateDocx(data, targetLanguage);
+            translatedFilePath = await regenerateDocx(user, data, targetLanguage);
         } else if (data.fileType.includes('pdf')) {
             translatedFilePath = await regeneratePdf(data, targetLanguage);
         }
 
-        data.translatedFilePath = translatedFilePath;
-        await data.save();
+        if (translatedFilePath) {
+            data.translatedFilePath = translatedFilePath;
+            await data.save();
 
-        res.status(200).send('Translation succeed.');
+            res.status(200).json({ message: 'Translation succeed.' });
+        } else {
+            res.status(500).json({ message: 'There are more characters in your file. Please try again.' });
+        }
+
     } catch (error) {
-        res.status(500).send('Error translating document');
+        res.status(500).json({ message: 'Error translating document' });
     }
 };

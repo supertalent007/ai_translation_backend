@@ -12,6 +12,9 @@ router.post('/auth/register', authController.register);
 router.post('/auth/login', authController.login);
 router.get('/user/:id', authController.getUser);
 router.delete('/user/:id', authController.deActiveUser);
+router.post('/auth/reset_password', authController.resetPassword);
+router.post('/auth/request_reset', authController.generateCode);
+router.post('/auth/verify_code', authController.verifyCode);
 
 router.post('/upload', translateController.uploadFile);
 router.get('/saved_data', translateController.getSavedData);

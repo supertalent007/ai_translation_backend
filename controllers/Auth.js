@@ -1,6 +1,8 @@
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const ResetCode = require('../models/ResetCode');
+const nodemailer = require('nodemailer');
 
 const generateToken = (user) => {
     return jwt.sign({ id: user._id }, 'secret', { expiresIn: '1h' });
@@ -80,3 +82,90 @@ exports.deActiveUser = async (req, res) => {
         res.status(500).json({ message: 'Server error', error });
     }
 }
+
+exports.generateCode = async (req, res) => {
+    const { email } = req.body;
+
+    const generateSixDigitCode = () => {
+        const min = 100000;
+        const max = 999999;
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    };
+
+    const code = generateSixDigitCode().toString();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+    await ResetCode.findOneAndUpdate(
+        { email },
+        { code, expiresAt },
+        { upsert: true }
+    );
+
+    const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+            user: 'kinddevice0@gmail.com',
+            pass: 'ckguvgzvohqplxld'
+        }
+    });
+
+    const mailOptions = {
+        from: 'kinddevice0@gmail.com',
+        to: email,
+        subject: 'Password Reset Code',
+        text: `Your password reset code is: ${code}`
+    };
+
+    try {
+        await transporter.sendMail(mailOptions);
+        res.status(200).send('Reset code sent to email');
+    } catch (error) {
+        res.status(500).send('Error sending email');
+    }
+}
+
+exports.verifyCode = async (req, res) => {
+    const { email, code } = req.body;
+
+    try {
+        const data = await ResetCode.findOne({ email: email, code: code });
+
+        if (!data) {
+            return res.status(404).json({ message: "No matching reset code found." });
+        }
+
+        const currentDate = new Date();
+        if (data.expiresAt < currentDate) {
+            return res.status(400).json({ message: "Reset code has expired." });
+        }
+
+        res.status(200).json({ message: 'Verify succeed.' })
+
+    } catch (error) {
+        console.error("Error finding reset code:", error);
+        return res.status(500).json({ message: "Internal server error." });
+    }
+}
+
+exports.resetPassword = async (req, res) => {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+        return res.status(400).json({ message: "Email and password are required." });
+    }
+
+    try {
+        const user = await User.findOne({ email: email });
+        if (!user) {
+            return res.status(404).json({ message: "User not found." });
+        }
+
+        user.password = password;
+        await user.save();
+
+        return res.status(200).json({ message: "Password updated successfully." });
+    } catch (error) {
+        console.error("Error updating password:", error);
+        return res.status(500).json({ message: "Internal server error." });
+    }
+};

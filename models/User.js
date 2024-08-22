@@ -2,14 +2,6 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const Schema = mongoose.Schema;
 
-const subscriptionSchema = new Schema({
-    stripeSubscriptionId: String,
-    status: String,
-    priceId: String,
-    currentPeriodStart: Date,
-    currentPeriodEnd: Date,
-});
-
 const userSchema = new Schema({
     firstName: {
         type: String,
@@ -27,7 +19,21 @@ const userSchema = new Schema({
         type: String,
         require: true
     },
-    subscriptions: [subscriptionSchema]
+    subscriptionId: {
+        type: String
+    },
+    characterLimit: {
+        type: Number,
+        default: 10000
+    },
+    pageLimit: {
+        type: Number,
+        default: 10
+    },
+    fileSizeLimit: {
+        type: Number,
+        default: 1 * 1024 * 1024
+    },
 }, { timestamps: true });
 
 userSchema.pre("save", async function (next) {
