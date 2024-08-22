@@ -4,6 +4,11 @@ const User = require("../models/User");
 const ResetCode = require('../models/ResetCode');
 const nodemailer = require('nodemailer');
 
+require('dotenv').config();
+
+const appEmail = process.env.APP_EMAIL;
+const appPassword = process.env.APP_PASSWORD;
+
 const generateToken = (user) => {
     return jwt.sign({ id: user._id }, 'secret', { expiresIn: '1h' });
 };
@@ -28,8 +33,61 @@ exports.register = async (req, res) => {
 
     const token = generateToken(newUser);
 
-    res.status(200).json({ token: token });
+    const url = `${process.env.FRONTEND_URL}/verify-email?token=${token}`;
 
+    const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+            user: appEmail,
+            pass: appPassword
+        }
+    });
+
+    const mailOptions = {
+        from: appEmail,
+        to: email,
+        subject: 'Verify your email',
+        html: `<p>Click <a href="${url}">here</a> to verify your email.</p>`
+    };
+
+    transporter.sendMail(mailOptions, (error, info) => {
+        if (error) {
+            console.error('Error sending email:', error);
+        } else {
+            console.log('Email sent:', info.response);
+        }
+    });
+
+    res.status(200).json({ message: 'User registered. Please check your email to verify your account.' });
+
+}
+
+exports.verify = async (req, res) => {
+    const verifyUser = async (id) => {
+        const user = await User.findById(id);
+
+        if (user) {
+            user.isVerified = true;
+            await user.save();
+
+            return true;
+        }
+        return false;
+    }
+    try {
+        const token = req.query.token;
+        const decoded = jwt.verify(token, 'secret');
+        const userId = decoded.id;
+
+        const isValidUser = await verifyUser(userId);
+
+        if (isValidUser) {
+            res.status(200).json({ message: 'Email verified.' });
+        }
+    } catch (error) {
+        console.error('Email verification error:', error);
+        res.status(400).send('Invalid or expired token.');
+    }
 }
 
 exports.login = async (req, res) => {
@@ -40,6 +98,10 @@ exports.login = async (req, res) => {
 
         if (!validUser) {
             return res.status(401).json({ message: "Invalid email or password" });
+        }
+
+        if (!validUser.isVerified) {
+            return res.status(500).json({ message: "You must verify your email." });
         }
 
         const isMatch = await bcrypt.compare(password, validUser.password);
@@ -104,13 +166,13 @@ exports.generateCode = async (req, res) => {
     const transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
-            user: 'kinddevice0@gmail.com',
-            pass: 'ckguvgzvohqplxld'
+            user: appEmail,
+            pass: appPassword
         }
     });
 
     const mailOptions = {
-        from: 'kinddevice0@gmail.com',
+        from: appEmail,
         to: email,
         subject: 'Password Reset Code',
         text: `Your password reset code is: ${code}`

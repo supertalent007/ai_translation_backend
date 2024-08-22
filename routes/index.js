@@ -10,6 +10,7 @@ router.use(express.urlencoded({ extended: false }));
 
 router.post('/auth/register', authController.register);
 router.post('/auth/login', authController.login);
+router.get('/auth/verify', authController.verify);
 router.get('/user/:id', authController.getUser);
 router.delete('/user/:id', authController.deActiveUser);
 router.post('/auth/reset_password', authController.resetPassword);

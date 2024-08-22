@@ -15,6 +15,10 @@ const userSchema = new Schema({
         type: String,
         require: true
     },
+    isVerified: {
+        type: Boolean,
+        default: false,
+    },
     password: {
         type: String,
         require: true
